@@ -1,81 +1,103 @@
-import React, { useState } from 'react';
-import { MessageSquare, Star, Calendar, Clock, User, Phone, Video, MapPin } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { MessageSquare, Star, Calendar, Clock, User } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 const ConsultationExpert = () => {
-  const [selectedExpert, setSelectedExpert] = useState<number | null>(null);
+  const { profile } = useAuth();
+  const [selectedExpert, setSelectedExpert] = useState<string | null>(null);
   const [showBookingModal, setShowBookingModal] = useState(false);
-  const [bookings, setBookings] = useState([
-    {
-      id: 1,
-      expertName: 'Nizar Fathun Nazar',
-      date: '2025-01-15',
-      time: '14:00',
-      type: 'Video Call',
-      status: 'confirmed',
-    },
-  ]);
+  const [experts, setExperts] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const experts = [
-    {
-      id: 1,
-      name: 'Nizar Fathun Nazar',
-      title: 'Senior Digital Marketing Strategist',
-      experience: '8+ tahun',
-      rating: 4.9,
-      reviews: 127,
-      specialties: ['Social Media Marketing', 'Content Strategy', 'Paid Advertising'],
-      price: 'Rp 150.000/jam',
-      avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
-      available: true,
-    },
-    {
-      id: 2,
-      name: 'Khairunisa Wahyu H',
-      title: 'E-commerce Marketing Expert',
-      experience: '6+ tahun',
-      rating: 4.8,
-      reviews: 89,
-      specialties: ['E-commerce', 'Conversion Optimization', 'Analytics'],
-      price: 'Rp 125.000/jam',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
-      available: true,
-    },
-    {
-      id: 3,
-      name: 'Nana Andyana',
-      title: 'Content Creator & Influencer Marketing',
-      experience: '5+ tahun',
-      rating: 4.7,
-      reviews: 156,
-      specialties: ['Content Creation', 'Influencer Marketing', 'Brand Partnerships'],
-      price: 'Rp 100.000/jam',
-      avatar: 'https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&fit=crop',
-      available: false,
-    },
-  ];
+  useEffect(() => {
+    fetchExperts();
+    if (profile) {
+      fetchBookings();
+    }
+  }, [profile]);
 
-  const handleBookConsultation = (expertId: number) => {
+  const fetchExperts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('experts')
+        .select('*')
+        .order('rating', { ascending: false });
+
+      if (error) throw error;
+      setExperts(data || []);
+    } catch (error) {
+      console.error('Error fetching experts:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchBookings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('consultations')
+        .select('*, experts(*)')
+        .eq('user_id', profile?.id)
+        .order('date', { ascending: true });
+
+      if (error) throw error;
+      setBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    }
+  };
+
+  const handleBookConsultation = (expertId: string) => {
     setSelectedExpert(expertId);
     setShowBookingModal(true);
   };
 
-  const handleSaveBooking = (bookingData: any) => {
-    const expert = experts.find(e => e.id === selectedExpert);
-    const newBooking = {
-      id: Date.now(),
-      expertName: expert?.name || '',
-      ...bookingData,
-      status: 'confirmed',
-    };
-    setBookings([...bookings, newBooking]);
-    setShowBookingModal(false);
-    alert('Konsultasi berhasil dijadwalkan!');
+  const handleSaveBooking = async (bookingData: any) => {
+    try {
+      const { error } = await supabase.from('consultations').insert({
+        user_id: profile?.id,
+        expert_id: selectedExpert,
+        date: bookingData.date,
+        time: bookingData.time,
+        type: bookingData.type,
+        status: 'confirmed',
+      });
+
+      if (error) throw error;
+      await fetchBookings();
+      setShowBookingModal(false);
+      alert('Konsultasi berhasil dijadwalkan!');
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
   };
 
-  const handleCancelBooking = (bookingId: number) => {
-    setBookings(bookings.filter(booking => booking.id !== bookingId));
-    alert('Jadwal konsultasi berhasil dibatalkan!');
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!confirm('Batalkan jadwal konsultasi ini?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('consultations')
+        .delete()
+        .eq('id', bookingId);
+
+      if (error) throw error;
+      await fetchBookings();
+      alert('Jadwal konsultasi berhasil dibatalkan!');
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading experts...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -89,7 +111,6 @@ const ConsultationExpert = () => {
         </p>
       </div>
 
-      {/* My Bookings */}
       {bookings.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Jadwal Konsultasi Saya</h3>
@@ -101,7 +122,7 @@ const ConsultationExpert = () => {
                     <Calendar className="h-5 w-5 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-medium text-gray-800">{booking.expertName}</p>
+                    <p className="font-medium text-gray-800">{booking.experts?.name}</p>
                     <p className="text-sm text-gray-600">
                       {new Date(booking.date).toLocaleDateString('id-ID')} - {booking.time} ({booking.type})
                     </p>
@@ -124,13 +145,12 @@ const ConsultationExpert = () => {
         </div>
       )}
 
-      {/* Experts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {experts.map((expert) => (
           <div key={expert.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-all duration-300">
             <div className="flex items-start space-x-4 mb-4">
               <img
-                src={expert.avatar}
+                src={expert.avatar_url}
                 alt={expert.name}
                 className="w-16 h-16 rounded-full object-cover"
               />
@@ -153,7 +173,7 @@ const ConsultationExpert = () => {
                 <span>{expert.experience} pengalaman</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {expert.specialties.map((specialty, index) => (
+                {expert.specialties?.map((specialty: string, index: number) => (
                   <span
                     key={index}
                     className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full"
@@ -187,80 +207,91 @@ const ConsultationExpert = () => {
         ))}
       </div>
 
-      {/* Booking Modal */}
       {showBookingModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-800">Book Konsultasi</h2>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const formData = new FormData(e.target as HTMLFormElement);
-                handleSaveBooking({
-                  date: formData.get('date'),
-                  time: formData.get('time'),
-                  type: formData.get('type'),
-                });
-              }}
-              className="p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tanggal
-                </label>
-                <input
-                  type="date"
-                  name="date"
-                  required
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Waktu
-                </label>
-                <input
-                  type="time"
-                  name="time"
-                  required
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Jenis Konsultasi
-                </label>
-                <select
-                  name="type"
-                  required
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="Video Call">Video Call</option>
-                  <option value="Phone Call">Phone Call</option>
-                  <option value="In Person">Tatap Muka</option>
-                </select>
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowBookingModal(false)}
-                  className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Konfirmasi Booking
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <BookingModal
+          onSave={handleSaveBooking}
+          onClose={() => setShowBookingModal(false)}
+        />
       )}
+    </div>
+  );
+};
+
+const BookingModal: React.FC<{ onSave: (data: any) => void; onClose: () => void }> = ({ onSave, onClose }) => {
+  const [formData, setFormData] = useState({
+    date: '',
+    time: '',
+    type: 'Video Call',
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(formData);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-800">Book Konsultasi</h2>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tanggal
+            </label>
+            <input
+              type="date"
+              value={formData.date}
+              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+              required
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Waktu
+            </label>
+            <input
+              type="time"
+              value={formData.time}
+              onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+              required
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Jenis Konsultasi
+            </label>
+            <select
+              value={formData.type}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              required
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="Video Call">Video Call</option>
+              <option value="Phone Call">Phone Call</option>
+              <option value="In Person">Tatap Muka</option>
+            </select>
+          </div>
+          <div className="flex space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Konfirmasi Booking
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };

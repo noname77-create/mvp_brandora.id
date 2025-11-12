@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Sidebar from "./components/Layout/Sidebar";
 import MobileNav from "./components/Layout/MobileNav";
 import Dashboard from "./components/Dashboard/Dashboard";
@@ -13,8 +14,8 @@ import Login from "./components/Auth/Login";
 import Profile from "./components/Profile/Profile";
 import Settings from "./components/Settings/Settings";
 
-function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+function AppContent() {
+  const { user, loading } = useAuth();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   React.useEffect(() => {
@@ -25,8 +26,16 @@ function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  if (!isAuthenticated) {
-    return <Login onLogin={() => setIsAuthenticated(true)} />;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
   }
 
   return (
@@ -51,6 +60,14 @@ function App() {
         {isMobile && <MobileNav />}
       </div>
     </Router>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

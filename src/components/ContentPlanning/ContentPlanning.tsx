@@ -1,47 +1,72 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Filter, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 import Calendar from './Calendar';
 import EventModal from './EventModal';
 
 const ContentPlanning = () => {
+  const { profile } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedPlatform, setSelectedPlatform] = useState('all');
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [showEventModal, setShowEventModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [events, setEvents] = useState([
-    {
-      id: 1,
-      title: 'Post Instagram - Promo Summer Sale',
-      date: new Date(2025, 0, 15),
-      platform: 'Instagram',
-      type: 'Feed Post',
-      time: '09:00',
-      status: 'scheduled',
-    },
-    {
-      id: 2,
-      title: 'TikTok Video - Tutorial Makeup',
-      date: new Date(2025, 0, 16),
-      platform: 'TikTok',
-      type: 'Short Video',
-      time: '14:00',
-      status: 'draft',
-    },
-    {
-      id: 3,
-      title: 'LinkedIn Article - Industry Insight',
-      date: new Date(2025, 0, 18),
-      platform: 'LinkedIn',
-      type: 'Article',
-      time: '10:30',
-      status: 'scheduled',
-    },
-  ]);
+  const [events, setEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const platforms = ['all', 'Instagram', 'TikTok', 'Facebook', 'LinkedIn'];
 
-  const filteredEvents = events.filter(event => 
+  useEffect(() => {
+    if (profile) {
+      fetchSchedules();
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      if (width < 768) {
+        setViewMode('week');
+      } else {
+        setViewMode('month');
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const fetchSchedules = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('content_schedules')
+        .select('*')
+        .eq('user_id', profile?.id)
+        .order('scheduled_date', { ascending: true });
+
+      if (error) throw error;
+
+      const formattedEvents = (data || []).map((schedule: any) => ({
+        id: schedule.id,
+        title: schedule.title,
+        date: new Date(schedule.scheduled_date),
+        platform: schedule.platform,
+        type: schedule.content_type,
+        time: schedule.scheduled_time,
+        status: schedule.status,
+      }));
+
+      setEvents(formattedEvents);
+    } catch (error) {
+      console.error('Error fetching schedules:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredEvents = events.filter(event =>
     selectedPlatform === 'all' || event.platform === selectedPlatform
   );
 
@@ -50,19 +75,41 @@ const ContentPlanning = () => {
     setShowEventModal(true);
   };
 
-  const handleSaveEvent = (eventData: any) => {
-  const newEvent = {
-    id: Date.now(),
-    ...eventData,
-    // Prioritaskan tanggal dari eventData jika ada, fallback ke selectedDate
-    date: eventData.date ? new Date(eventData.date) : selectedDate,
-  };
-  setEvents([...events, newEvent]);
-  setShowEventModal(false);
-};
+  const handleSaveEvent = async (eventData: any) => {
+    try {
+      const { error } = await supabase.from('content_schedules').insert({
+        user_id: profile?.id,
+        title: eventData.title,
+        description: eventData.description,
+        platform: eventData.platform,
+        content_type: eventData.type,
+        scheduled_date: eventData.date,
+        scheduled_time: eventData.time,
+        status: eventData.status,
+      });
 
-  const handleDeleteEvent = (eventId: number) => {
-    setEvents(events.filter(event => event.id !== eventId));
+      if (error) throw error;
+      await fetchSchedules();
+      setShowEventModal(false);
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: number) => {
+    if (!confirm('Hapus jadwal ini?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('content_schedules')
+        .delete()
+        .eq('id', eventId);
+
+      if (error) throw error;
+      await fetchSchedules();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
   };
 
   const navigateMonth = (direction: 'prev' | 'next') => {
@@ -78,51 +125,40 @@ const ContentPlanning = () => {
   const formatMonthYear = (date: Date) => {
     return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
   };
-  // Helper: ambil jadwal hari ini
-const todayEvents = events.filter(event =>
-  event.date.toDateString() === new Date().toDateString()
-);
 
-// Helper: statistik bulan ini
-const monthEvents = events.filter(event =>
-  event.date.getMonth() === currentDate.getMonth() &&
-  event.date.getFullYear() === currentDate.getFullYear()
-);
+  const todayEvents = events.filter(event =>
+    event.date.toDateString() === new Date().toDateString()
+  );
 
-const stats = {
-  total: monthEvents.length,
-  draft: monthEvents.filter(e => e.status === 'draft').length,
-  scheduled: monthEvents.filter(e => e.status === 'scheduled').length,
-  published: monthEvents.filter(e => e.status === 'published').length,
-};
+  const monthEvents = events.filter(event =>
+    event.date.getMonth() === currentDate.getMonth() &&
+    event.date.getFullYear() === currentDate.getFullYear()
+  );
 
-// Distribusi platform
-const platformDistribution = ['Instagram','TikTok','Facebook','LinkedIn'].map(p => ({
-  platform: p,
-  count: monthEvents.filter(e => e.platform === p).length
-}));
+  const stats = {
+    total: monthEvents.length,
+    draft: monthEvents.filter(e => e.status === 'draft').length,
+    scheduled: monthEvents.filter(e => e.status === 'scheduled').length,
+    published: monthEvents.filter(e => e.status === 'published').length,
+  };
 
-// Konten mendatang
-const upcomingEvents = events
-  .filter(e => e.date > new Date())
-  .sort((a, b) => a.date.getTime() - b.date.getTime());
+  const platformDistribution = ['Instagram', 'TikTok', 'Facebook', 'LinkedIn'].map(p => ({
+    platform: p,
+    count: monthEvents.filter(e => e.platform === p).length
+  }));
 
+  const upcomingEvents = events
+    .filter(e => e.date > new Date())
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .slice(0, 5);
 
-  // Responsive view mode based on screen size
-  React.useEffect(() => {
-    const handleResize = () => {
-      const width = window.innerWidth;
-      if (width < 768) {
-        setViewMode('week');
-      } else {
-        setViewMode('month');
-      }
-    };
-
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-screen">
+        <div className="text-lg">Loading schedules...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -136,7 +172,6 @@ const upcomingEvents = events
         </p>
       </div>
 
-      {/* Controls */}
       <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
@@ -199,88 +234,85 @@ const upcomingEvents = events
           </button>
         </div>
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-  {/* Calendar (ambil 2 kolom) */}
-  <div className="md:col-span-2">
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <Calendar
-        currentDate={currentDate}
-        events={filteredEvents}
-        viewMode={viewMode}
-        onDateClick={handleDateClick}
-        onEventDelete={handleDeleteEvent}
-      />
-    </div>
+        <div className="md:col-span-2">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <Calendar
+              currentDate={currentDate}
+              events={filteredEvents}
+              viewMode={viewMode}
+              onDateClick={handleDateClick}
+              onEventDelete={handleDeleteEvent}
+            />
+          </div>
 
-    {/* Konten Mendatang */}
-    <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold mb-3">Konten Mendatang</h3>
-      <table className="w-full text-sm">
-        <thead className="text-left text-gray-600 border-b">
-          <tr>
-            <th className="py-2">Judul</th>
-            <th className="py-2">Platform</th>
-            <th className="py-2">Tanggal & Waktu</th>
-            <th className="py-2">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {upcomingEvents.map(ev => (
-            <tr key={ev.id} className="border-b last:border-0">
-              <td className="py-2">{ev.title}</td>
-              <td className="py-2">{ev.platform}</td>
-              <td className="py-2">{ev.date.toLocaleDateString('id-ID')} {ev.time}</td>
-              <td className="py-2 capitalize">{ev.status}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
+          {upcomingEvents.length > 0 && (
+            <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+              <h3 className="text-lg font-semibold mb-3">Konten Mendatang</h3>
+              <table className="w-full text-sm">
+                <thead className="text-left text-gray-600 border-b">
+                  <tr>
+                    <th className="py-2">Judul</th>
+                    <th className="py-2">Platform</th>
+                    <th className="py-2">Tanggal & Waktu</th>
+                    <th className="py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {upcomingEvents.map(ev => (
+                    <tr key={ev.id} className="border-b last:border-0">
+                      <td className="py-2">{ev.title}</td>
+                      <td className="py-2">{ev.platform}</td>
+                      <td className="py-2">{ev.date.toLocaleDateString('id-ID')} {ev.time}</td>
+                      <td className="py-2 capitalize">{ev.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
-  {/* Sidebar */}
-  <div className="space-y-6">
-    {/* Jadwal Hari Ini */}
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold mb-3">Jadwal Hari Ini</h3>
-      {todayEvents.length > 0 ? (
-        <ul className="space-y-2">
-          {todayEvents.map(ev => (
-            <li key={ev.id} className="text-sm">
-              <span className="font-medium">{ev.time}</span> - {ev.title}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-gray-500">Tidak ada jadwal hari ini</p>
-      )}
-    </div>
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h3 className="text-lg font-semibold mb-3">Jadwal Hari Ini</h3>
+            {todayEvents.length > 0 ? (
+              <ul className="space-y-2">
+                {todayEvents.map(ev => (
+                  <li key={ev.id} className="text-sm">
+                    <span className="font-medium">{ev.time}</span> - {ev.title}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">Tidak ada jadwal hari ini</p>
+            )}
+          </div>
 
-    {/* Statistik Bulan Ini */}
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold mb-3">Statistik Bulan Ini</h3>
-      <ul className="text-sm space-y-1">
-        <li>Total: {stats.total}</li>
-        <li>Draft: {stats.draft}</li>
-        <li>Terjadwal: {stats.scheduled}</li>
-        <li>Dipublikasi: {stats.published}</li>
-      </ul>
-    </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h3 className="text-lg font-semibold mb-3">Statistik Bulan Ini</h3>
+            <ul className="text-sm space-y-1">
+              <li>Total: {stats.total}</li>
+              <li>Draft: {stats.draft}</li>
+              <li>Terjadwal: {stats.scheduled}</li>
+              <li>Dipublikasi: {stats.published}</li>
+            </ul>
+          </div>
 
-    {/* Distribusi Platform */}
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold mb-3">Distribusi Platform</h3>
-      <ul className="text-sm space-y-1">
-        {platformDistribution.map(p => (
-          <li key={p.platform}>
-            {p.platform}: {p.count}
-          </li>
-        ))}
-      </ul>
-    </div>
-  </div>
-</div>
-      {/* Event Modal */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h3 className="text-lg font-semibold mb-3">Distribusi Platform</h3>
+            <ul className="text-sm space-y-1">
+              {platformDistribution.map(p => (
+                <li key={p.platform}>
+                  {p.platform}: {p.count}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+
       {showEventModal && (
         <EventModal
           date={selectedDate}
